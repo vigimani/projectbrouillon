@@ -26,6 +26,7 @@ describe("PolyPlus Investment", () => {
     WETH = await ethers.getContractAt(ABIS.ERC20, ADDRESS.WETH, deployer);
     STGLP_USDC = await ethers.getContractAt(ABIS.ERC20, "0x892785f33CdeE22A30AEF750F285E18c18040c3e", deployer);
     });
+0xDf0360Ad8C5ccf25095Aa97ee5F2785c8d848620
 
   describe("Deployment", function () {
     it("Should deploy the contracts", async () => {

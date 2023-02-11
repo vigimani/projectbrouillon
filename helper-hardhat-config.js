@@ -4,10 +4,13 @@ const networkConfig = {
     },
     5: {
         name: "goerli"
+    },
+    42161: {
+        name: "arbitrum"
     }
 }
 
-const developmentChains = ["hardhat", "localhost"]
+const developmentChains = ["hardhat", "localhost", "arbitrum"]
 
 module.exports = {
     networkConfig,

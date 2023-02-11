@@ -29,7 +29,7 @@ contract Strat1 is Ownable {
     mapping(address => address) public oracles;
 
     constructor() {
-        IGMXRouter(gmxRouter).approvePlugin(gmxPositionRouter);
+
         oracles[
             0x82aF49447D8a07e3bd95BD0d56f35241523fBab1
         ] = 0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612;
@@ -39,20 +39,20 @@ contract Strat1 is Ownable {
         // address indexToken,
         uint256 tokenAmount,
         bool isLong
-    ) external payable {
+    ) external payable onlyOwner{
+        IGMXRouter(gmxRouter).approvePlugin(gmxPositionRouter);
         IERC20(USDC).transferFrom(msg.sender, address(this), tokenAmount);
         IERC20(USDC).approve(gmxRouter, tokenAmount);
         (, int256 price, , , ) = AggregatorV3Interface(oracles[WETH])
             .latestRoundData();
         uint256 positionSize = ((tokenAmount * 110) / 100) * 1e24; // 1.1x leverage (1e12 for normalization + 1e12 for GMX precision)
-        // address cb = 0x0000000000000000000000000000000000000000;
         uint256 acceptablePrice = 0;
         console.log("bug ici");
         if (isLong) {
             address[] memory path = new address[](2);
             path[0] = USDC;
             path[1] = WETH;
-            acceptablePrice = ((uint256(price) * 15030) / 10000) * 1e22; // GMX uses 30 bps tolerance
+            acceptablePrice = ((uint256(price) * 10030) / 10000) * 1e22; // GMX uses 30 bps tolerance
             console.log("Params :");
             console.log("path0 :", path[0]);
             console.log("path1 :", path[1]);
@@ -73,12 +73,12 @@ contract Strat1 is Ownable {
                 acceptablePrice,
                 20000000000000000,
                 0x0,
-                address(0)
+                0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
             );            
         }
     }
 
-    function closePosition(bool isLong) external payable {
+    function closePosition(bool isLong) external payable onlyOwner {
         (,int price,,,) = AggregatorV3Interface(oracles[WETH]).latestRoundData();
         uint256 acceptablePrice = 0;
         if (isLong) {
@@ -93,24 +93,5 @@ contract Strat1 is Ownable {
             IGMXPositionRouter(gmxPositionRouter).createDecreasePosition{value: msg.value}(path, WETH, collateralDelta, sizeDelta, isLong, address(this), acceptablePrice, 0, 20000000000000000, false, address(0));
         }
     }
-
-    // function getOpenPosition() external returns(uint256 a){
-    //     address[] memory _indexTokens = new address[](1);
-    //     address[] memory _collateralTokens = new address[](1);
-    //     bool[] memory _isLong = new bool[](1);
-    //     _indexTokens[0] = WETH;
-    //     _collateralTokens[0]= WETH;
-    //     _isLong[0] = true;
-    //     // return IGMXReader(gmxReader).getPositions(gmxVault, address(this), _indexTokens, _collateralTokens, _isLong);
-    //     (uint256 size,
-    //          uint256 collateral,
-    //          uint256 averagePrice,
-    //          uint256 entryFundingRate,
-    //          /* reserveAmount */,
-    //          uint256 realisedPnl,
-    //          bool hasRealisedProfit,
-    //          uint256 lastIncreasedTime) = IGMXVault(gmxVault).getPosition(address(this), WETH, WETH, true);
-    //     return (size);
-    // }
 
 }
