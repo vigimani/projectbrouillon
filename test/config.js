@@ -1,4 +1,6 @@
-const ethers = require('ethers');
+const { ethers } = require("hardhat");
+
+const PROVIDER = new ethers.providers.JsonRpcProvider();
 
 module.exports = {
     ABIS: {
@@ -20,7 +22,5 @@ module.exports = {
         GMX_ROUTER : "0xaBBc5F99639c9B6bCb58544ddf04EFA6802F4064",
         GMX_READER : "0x22199a49A999c351eF7927602CFB187ec3cae489",
         GMX_POSITION_ROUTER : "0xb87a436B93fFE9D75c5cFA7bAcFff96430b09868",
-        STARGATE_ROUTER : "0x8731d54E9D02c286767d56ac03e8037C07e01e98",
-        STARGATE_POOL_USDC : "0x892785f33CdeE22A30AEF750F285E18c18040c3e",
     },
   };
