@@ -151,6 +151,7 @@ describe("GMX controller unit tests", () => {
         expect(await GMX_POSITION_ROUTER.isPositionKeeper(deployer.address)).to
           .be.true;
       });
+      
     });
     describe("Test LONG ETH/USDC", function () {
       before(async function () {
@@ -160,8 +161,6 @@ describe("GMX controller unit tests", () => {
       describe("should open a LONG ETH/USDC", function () {
         before(async function () {
           tokenAmount = "15000000";
- 
-
         });
         it("should add a request", async function () {
           waitingPositionsT0 = await waitingPositionsLength(true);
@@ -202,6 +201,14 @@ describe("GMX controller unit tests", () => {
           );
           console.log("Nav after 2nd open : ", parseInt(positiont2[1].toString())+parseInt(positiont2[8].toString()))  
 
+        });
+      });
+      describe("should NOT open a LONG ETH/USDC", function () {
+        it("should not add a request", async function () {
+          await expect(GMX_controller.connect(accounts[2]).increasePosition(tokenAmount, true, {
+            value: keepersFee,
+            gasLimit: 10000000,
+          })).to.be.revertedWith("Not vault")
         });
       });
       describe("should close a LONG ETH/USDC", function () {
@@ -337,6 +344,14 @@ describe("GMX controller unit tests", () => {
           );
         });
       });
+      describe("should NOT open a SHORT ETH/USDC", function () {
+        it("should not add a request", async function () {
+          await expect(GMX_controller.connect(accounts[2]).increasePosition(tokenAmount, true, {
+            value: keepersFee,
+            gasLimit: 10000000,
+          })).to.be.revertedWith("Not vault")
+        });
+      });
       describe("should close a SHORT ETH/USDC", function () {
         before(async function () {
           tokenAmount = "25000000";
@@ -364,6 +379,14 @@ describe("GMX controller unit tests", () => {
           positiont1 = await getPositions(GMX_controller.address, false);
           positiont1.forEach((elem) => console.log(elem.toString()));
           await expect(positiont1[0]).to.not.equal(positiont0[0]);
+        });
+      });
+      describe("should NOT close a SHORT ETH/USDC", function () {
+        it("should not add a request", async function () {
+          await expect(GMX_controller.connect(accoutns[2]).decreasePosition(deployer.address, tokenAmount, false, {
+            value: keepersFee,
+            gasLimit: 10000000,
+          })).to.be.revertedWith("Not vault")
         });
       });
       describe("should liquidate the SHORT ETH/USDC", function () {
@@ -394,6 +417,14 @@ describe("GMX controller unit tests", () => {
         });
         it("should liquidate the position", async function () {
           expect((await getPositions(GMX_controller.address, false))[0]).to.be.eq("0");
+        });
+      });
+      describe("should NOT liquidate a SHORT ETH/USDC", function () {
+        it("should not add a request", async function () {
+          await expect(GMX_controller.connect(accounts[2]).liquidatePosition(false, {
+            value: keepersFee,
+            gasLimit: 10000000,
+          }).to.be.revertedWith("Not vault"))
         });
       });
     });

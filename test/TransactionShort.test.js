@@ -2,6 +2,7 @@ const { assert, expect, expectRevert, withNamedArgs } = require("chai");
 const { network, deployments, ethers } = require("hardhat");
 const { developmentChains } = require("../helper-hardhat-config");
 const { ABIS, ADDRESS } = require("./@config");
+const {getData, WaitingPositionsLength, VaultInfo, UserInfo, PositionInfo, Impersonate } = require("./@utils");
 
 !developmentChains.includes(network.name)
   ? describe.skip
@@ -11,37 +12,26 @@ const { ABIS, ADDRESS } = require("./@config");
         //SIGNERS AND ACCOUNTS
         accounts = await ethers.getSigners();
         provider = await ethers.provider;
+
         deployer = accounts[0];
         keeper = accounts[9];
         user = accounts[1];
         user2 = accounts[2]
         user3 = accounts[3]
-        //whale USDC
-        await network.provider.request({
-          method: "hardhat_impersonateAccount",
-          params: [ADDRESS.WHALE_USDC],
-        });
-        whale = await ethers.getSigner(ADDRESS.WHALE_USDC);
-        //GMX Admin
-        await network.provider.request({
-          method: "hardhat_impersonateAccount",
-          params: ["0xB4d2603B2494103C90B2c607261DD85484b49eF0"],
-        });
-        gmxAdmin = await ethers.getSigner(
-          "0xB4d2603B2494103C90B2c607261DD85484b49eF0"
-        );
+        whale = await Impersonate(ADDRESS.WHALE_USDC) //to fund hardhat account with real USDC
+        gmxAdmin = await Impersonate(ADDRESS.GMX_ADMIN_ACCOUNT) //to athorize a keepers for validating tx
 
         //VARIABLE
         keepersFee = ethers.utils.parseEther("0.01");
         deposit1 = "100000000"
         deposit2 = "150000000"
         deposit3 = "250000000"
+
         //CONTRACTS
         await deployments.fixture(["MyVault"]);
         MyVault = await ethers.getContract("MyVault");
         await deployments.fixture(["GMX_controller"]);
         GMX_controller = await ethers.getContract("GMX_controller");
-
         USDC = await ethers.getContractAt(ABIS.ERC20, ADDRESS.USDC, deployer);
         WETH = await ethers.getContractAt(ABIS.ERC20, ADDRESS.WETH, deployer);
         GMX_ROUTER = await ethers.getContractAt(
@@ -66,52 +56,28 @@ const { ABIS, ADDRESS } = require("./@config");
         );
 
         //UTILS FONCTIONS
-        getPositions = async (_addr, _isLong) => {
-          let collateralToken = _isLong ? ADDRESS.WETH : ADDRESS.USDC;
-          let response = await GMX_READER.getPositions(
-            ADDRESS.GMX_VAULT,
-            _addr,
-            [collateralToken],
-            ["0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"],
-            [_isLong]
-          );
-          return response;
-        };
         positionInfo = async(_isLong) => {
-          let response = await getPositions(GMX_controller.address, _isLong)
-          data = {
-            size : parseInt((response[0].toString())),
-            collateral : parseInt((response[1].toString())),
-            avg_price : parseInt((response[2].toString())),
-            delta : parseInt((response[8].toString())),
-            leverage : parseInt((response[0].toString())) / parseInt((response[1].toString())),
-            nav : parseInt((response[1].toString()))+parseInt((response[8].toString()))
-          }
-          return(data)
+          return await PositionInfo(GMX_controller.address, _isLong)
         }
         userInfo = async(_user) => {
-          ethBalance = parseInt((await _user.getBalance()).toString());
-          usdcBalance = parseInt((await USDC.balanceOf(_user.address)).toString());
-          plpBalance = parseInt((await MyVault.balanceOf(_user.address)).toString());
-          totalsupply = parseInt((await MyVault.totalSupply()).toString());
-          return({
-            eth_balance : ethBalance, 
-            usdc_balance : usdcBalance, 
-            plp_balance : plpBalance, 
-            shares : plpBalance/totalsupply
-          })
+          return await UserInfo(MyVault, _user)
         }
         vaultInfo = async() => {
-          totalsupply = parseInt((await MyVault.totalSupply()).toString());
-          await MyVault.updateNetAssetValue();
-          netAssetValue = parseInt((await MyVault.getNetAssetValue()).toString())
-          pricepershare = netAssetValue / totalsupply;
-          return({
-            price_per_share: pricepershare, 
-            total_supply: totalsupply, 
-            net_asset_value: netAssetValue
-          })
+          return await VaultInfo(MyVault)
         }
+        executeIncreasePositions = async () => {
+          await GMX_POSITION_ROUTER.connect(keeper).executeIncreasePositions(
+            parseInt(await WaitingPositionsLength(GMX_POSITION_ROUTER, true)),
+            GMX_controller.address
+          );
+        };
+        executeDecreasePositions = async () => {
+          await GMX_POSITION_ROUTER.connect(keeper).executeDecreasePositions(
+            parseInt(await WaitingPositionsLength(GMX_POSITION_ROUTER, false)),
+            GMX_controller.address
+          );
+        };
+
         depositStrat = async(_user, amount) => {
           depositAmount = amount;
           let txapprove = await USDC.connect(_user).approve(
@@ -141,39 +107,14 @@ const { ABIS, ADDRESS } = require("./@config");
           txr2 = await txclosepos.wait();
           await executeDecreasePositions();
         }
-        waitingPositionsLength = async (isIncrease) => {
-          let a = isIncrease ? 1 : 3;
-          return (
-            await ("getRequestQueueLengths",
-            await GMX_POSITION_ROUTER.getRequestQueueLengths())
-          )[a].toString();
-        };
-        waitingPositionsStart = async (isIncrease) => {
-          let a = isIncrease ? 0 : 2;
-          return (
-            await ("getRequestQueueLengths",
-            await GMX_POSITION_ROUTER.getRequestQueueLengths())
-          )[a].toString();
-        };
-        executeIncreasePositions = async () => {
-          await GMX_POSITION_ROUTER.connect(keeper).executeIncreasePositions(
-            parseInt(await waitingPositionsLength(true)),
-            GMX_controller.address
-          );
-        };
-        executeDecreasePositions = async () => {
-          await GMX_POSITION_ROUTER.connect(keeper).executeDecreasePositions(
-            parseInt(await waitingPositionsLength(false)),
-            GMX_controller.address
-          );
-        };
+
       });
+      
       describe("Full test on Short position", function () {
         before(async () => {
           //Initialisation parameters
           await MyVault.setGMX_controller(GMX_controller.address);
           await MyVault.acceptToken(USDC.address);
-
           await USDC.connect(whale).transfer(
             user.address,
             ethers.utils.parseUnits("10", "6").mul(1000),
@@ -197,138 +138,120 @@ const { ABIS, ADDRESS } = require("./@config");
         });
         describe("First deposit", function () {
           before(async () => {
-            beforePos = await positionInfo(false) //true for long false for short
-            beforeUser = await userInfo(user)
-            beforeVault = await vaultInfo()
-
+            //user, vault contract, GMX_controller contract, USDC contract
+            beforeTx = await getData(MyVault, GMX_controller, USDC, user)
             await depositStrat(user, deposit1)
-
-            afterPos = await positionInfo(false) //true for long false for short
-            afterUser = await userInfo(user)
-            afterVault = await vaultInfo()
+            afterTx = await getData(MyVault, GMX_controller, USDC, user)
           });
           it("tests on user balances", async function () {
-            await expect(afterUser["usdc_balance"]).to.be.eq(beforeUser["usdc_balance"]-deposit1)
-            await expect(afterUser["shares"]).to.be.eq(1)
-            await expect(afterUser["plp_balance"]).to.be.eq(parseInt(deposit1))
+            await expect(afterTx["user"][1]["usdc_balance"]).to.be.eq(beforeTx["user"][1]["usdc_balance"]-deposit1)
+            await expect(afterTx["user"][1]["shares"]).to.be.eq(1)
+            await expect(afterTx["user"][1]["plp_balance"]).to.be.eq(parseInt(deposit1))
             console.log("Deposit 1 :", deposit1)
-            console.log("Acq. price of PLP :", deposit1/afterUser["plp_balance"])
-            console.log("# PLP received :", afterUser["plp_balance"])
-            console.log("Post - Price per share :", afterVault["price_per_share"])
-            console.log("Fees paid :", deposit1-afterUser["plp_balance"]*afterVault["price_per_share"]) 
-            console.log("Total value of investment :", afterUser["plp_balance"]*afterVault["price_per_share"])
+            console.log("Acq. price of PLP :", deposit1/afterTx["user"][1]["plp_balance"])
+            console.log("# PLP received :", afterTx["user"][1]["plp_balance"])
+            console.log("Post - Price per share :", afterTx["vault"]["share_price"])
+            console.log("Fees paid :", deposit1-afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"]) 
+            console.log("Total value of investment :", afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"])
           });
           it("tests on positions", async function () {
-            await expect(afterPos["size"]/10**24).to.be.eq(parseInt(parseInt(deposit1*1.1).toFixed(0)))
-            // await expect(afterPos["size"]/10**24).to.be.eq(2)
-            await expect(afterPos["leverage"]).to.be.within(1.09, 1.12)
-            console.log("Leverage :", afterPos["leverage"])
+            await expect(afterTx["positions"]["long"]["size"]).to.be.eq(0)
+            await expect(afterTx["positions"]["short"]["size"]/10**24).to.be.eq(parseInt(parseInt(deposit1*1.1).toFixed(0)))
+            await expect(afterTx["positions"]["short"]["leverage"]).to.be.within(1.09, 1.11)
           });
         });
         describe("Second deposit", function () {
           before(async () => {
-            beforePos = await positionInfo(false)
-            beforeUser = await userInfo(user)
-            beforeUser2 = await userInfo(user2)
-            beforeVault = await vaultInfo()
+            beforeTx = await getData(MyVault, GMX_controller, USDC, user, user2)
             await depositStrat(user2, deposit2)
-            afterPos = await positionInfo(false)
-            afterUser = await userInfo(user)
-            afterUser2 = await userInfo(user2)
-            afterVault = await vaultInfo()
+            afterTx = await getData(MyVault, GMX_controller, USDC, user, user2)
+            console.log(beforeTx)
+            console.log(afterTx)
           });
           it("tests on user 2", async function () {
-            await expect(afterUser2["usdc_balance"]).to.be.eq(beforeUser2["usdc_balance"]-parseInt(deposit2));
+            await expect(afterTx["user"][2]["usdc_balance"]).to.be.eq(beforeTx["user"][2]["usdc_balance"]-parseInt(deposit2));
           });
           it("tests on position", async function () {
-            await expect(afterPos["size"]/10**24).to.be.eq(beforePos["size"]/10**24+parseInt(parseInt(deposit2*1.1).toFixed(0)))
-            await expect(afterPos["leverage"]).to.be.within(1.09, 1.12)
-            console.log("Leverage :", afterPos["leverage"])
+            await expect(afterTx["positions"]["short"]["size"]/10**24).to.be.eq(beforeTx["positions"]["short"]["size"]/10**24+parseInt(parseInt(deposit2*1.1).toFixed(0)))
+            await expect(afterTx["positions"]["short"]["leverage"]).to.be.within(1.09, 1.11)
+          });
+          it("tests on vault", async function () {
+            await expect(afterTx["vault"]["share_price"]).to.be.within( beforeTx["vault"]["share_price"], beforeTx["vault"]["share_price"]*1.01)
+            await expect( afterTx["vault"]["net_asset_value"]/10**6).to.be.within(beforeTx["vault"]["net_asset_value"]/10**6+0.9*parseInt(deposit2)/10**6, beforeTx["vault"]["net_asset_value"]/10**6+parseInt(deposit2)/10**6)
           });
           it("report", async function () {
             console.log("Deposit #2 :", deposit2)
-            console.log("Pre price per share :", beforeVault["price_per_share"])
-            console.log("Post price per share :", afterVault["price_per_share"])
-            console.log("var. :", parseInt((afterVault["price_per_share"]-beforeVault["price_per_share"])/(beforeVault["price_per_share"])).toFixed(2),"%")
-            console.log("Pre nav :", beforeVault["net_asset_value"]/10**6)
-            console.log("Post nav:", afterVault["net_asset_value"]/10**6)
-            console.log("var. :", afterVault["net_asset_value"]-beforeVault["net_asset_value"])
+            console.log("Pre price per share :", beforeTx["vault"]["share_price"])
+            console.log("Post price per share :", afterTx["vault"]["share_price"])
+            console.log("var. :", parseInt((afterTx["vault"]["share_price"]-beforeTx["vault"]["share_price"])/(beforeTx["vault"]["share_price"])).toFixed(2),"%")
+            console.log("Pre nav :", beforeTx["vault"]["net_asset_value"]/10**6)
+            console.log("Post nav:", afterTx["vault"]["net_asset_value"]/10**6)
+            console.log("var. :", afterTx["vault"]["net_asset_value"]-beforeTx["vault"]["net_asset_value"])
             console.log("--")
             console.log("User 1")
-            console.log("Acq. price of PLP :", deposit1/beforeUser["plp_balance"] )
-            console.log("Fees paid :", (deposit1-beforeUser["plp_balance"]*beforeVault["price_per_share"])/deposit1)
-            console.log("Pre op value :", (beforeUser["plp_balance"]*beforeVault["price_per_share"])/10**6)
-            console.log("Post op value :", (afterUser["plp_balance"]*afterVault["price_per_share"])/10**6)
-            console.log("Post op shares :", parseInt(100*afterUser["shares"]).toFixed(1),"%")
+            console.log("Acq. price of PLP :", deposit1/beforeTx["user"][1]["plp_balance"] )
+            console.log("Fees paid :", (deposit1-beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"])/deposit1)
+            console.log("Pre op value :", (beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"])/10**6)
+            console.log("Post op value :", (afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"])/10**6)
+            console.log("Post op shares :", parseInt(100*afterTx["user"][1]["shares"]).toFixed(1),"%")
             console.log("--")
             console.log("User 2")
             console.log("Amount invested : ", deposit2)
-            console.log("Acq. price of PLP :", deposit2/afterUser2["plp_balance"] )
-            console.log("PLP received : ", afterUser2["plp_balance"])
-            console.log("Value of investment : ", afterUser2["plp_balance"]*afterVault["price_per_share"])
-            console.log("share :", parseInt(100*afterUser2["shares"]).toFixed(1),"%")
-            console.log("Fees paid :", (deposit2-afterUser2["plp_balance"]*afterVault["price_per_share"])/deposit2)
+            console.log("Acq. price of PLP :", deposit2/afterTx["user"][2]["plp_balance"] )
+            console.log("PLP received : ", afterTx["user"][2]["plp_balance"])
+            console.log("Value of investment : ", afterTx["user"][2]["plp_balance"]*afterTx["vault"]["share_price"])
+            console.log("share :", parseInt(100*afterTx["user"][2]["shares"]).toFixed(1),"%")
+            console.log("Fees paid :", (deposit2-afterTx["user"][2]["plp_balance"]*afterTx["vault"]["share_price"])/deposit2)
           });
         });
         describe("Third deposit", function () {
           before(async () => {
-            beforePos = await positionInfo(false)
-            beforeUser = await userInfo(user)
-            beforeUser2 = await userInfo(user2)
-            beforeUser3 = await userInfo(user3)
-            beforeVault = await vaultInfo()
+            beforeTx = await getData(MyVault, GMX_controller, USDC, user, user2, user3)
             await depositStrat(user3, deposit3)
-            afterPos = await positionInfo(false)
-            afterUser = await userInfo(user)
-            afterUser2 = await userInfo(user2)
-            afterUser3 = await userInfo(user3)
-            afterVault = await vaultInfo()
+            afterTx = await getData(MyVault, GMX_controller, USDC, user, user2, user3)
           });
           it("tests on user 3", async function () {
-            await expect(afterUser3["usdc_balance"]).to.be.eq(beforeUser3["usdc_balance"]-parseInt(deposit3));
+            await expect(afterTx["user"][3]["usdc_balance"]).to.be.eq(beforeTx["user"][3]["usdc_balance"]-parseInt(deposit3));
           });
           it("tests on position", async function () {
-            await expect(afterPos["size"]/10**24).to.be.eq(beforePos["size"]/10**24+parseInt(parseInt(deposit3*1.1).toFixed(0)))
-            await expect(afterPos["leverage"]).to.be.within(1.09, 1.12)
-            console.log("Leverage :", afterPos["leverage"])
+            await expect(afterTx["positions"]["short"]["size"]/10**24).to.be.eq(beforeTx["positions"]["short"]["size"]/10**24+parseInt(parseInt(deposit3*1.1).toFixed(0)))
+            await expect(afterTx["positions"]["short"]["leverage"]).to.be.within(1.09, 1.12)
+            console.log("Leverage :", afterTx["positions"]["short"]["leverage"])
           });
           it("report", async function () {
             console.log("Deposit #3 :", deposit3)
-            console.log("Pre money price per share :", beforeVault["price_per_share"])
-            console.log("Post money price per share :", afterVault["price_per_share"])
-            console.log("var. :", parseInt((afterVault["price_per_share"]-beforeVault["price_per_share"])/(beforeVault["price_per_share"])).toFixed(2),"%")
-            console.log("Pre nav :", beforeVault["net_asset_value"]/10**6)
-            console.log("Post nav:", afterVault["net_asset_value"]/10**6)
-            console.log("var. :", afterVault["net_asset_value"]-beforeVault["net_asset_value"])
+            console.log("Pre money price per share :", beforeTx["vault"]["share_price"])
+            console.log("Post money price per share :", afterTx["vault"]["share_price"])
+            console.log("var. :", parseInt((afterTx["vault"]["share_price"]-beforeTx["vault"]["share_price"])/(beforeTx["vault"]["share_price"])).toFixed(2),"%")
+            console.log("Pre nav :", beforeTx["vault"]["net_asset_value"]/10**6)
+            console.log("Post nav:", afterTx["vault"]["net_asset_value"]/10**6)
+            console.log("var. :", afterTx["vault"]["net_asset_value"]-beforeTx["vault"]["net_asset_value"])
 
             console.log("--")
             console.log("User 1")
-            console.log("Acq. price of PLP :", deposit1/beforeUser["plp_balance"] )
-            console.log("Pre op value :", beforeUser["plp_balance"]*beforeVault["price_per_share"])
-            console.log("Post op value :", afterUser["plp_balance"]*afterVault["price_per_share"])
+            console.log("Acq. price of PLP :", deposit1/beforeTx["user"][1]["plp_balance"] )
+            console.log("Pre op value :", beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"])
+            console.log("Post op value :", afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"])
             console.log("--")
 
             console.log("User 2")
-            console.log("Acq. price of PLP :", deposit2/beforeUser2["plp_balance"] )
-            console.log("Pre op value :", beforeUser2["plp_balance"]*beforeVault["price_per_share"])
-            console.log("Post op value :", afterUser2["plp_balance"]*afterVault["price_per_share"])
+            console.log("Acq. price of PLP :", deposit2/beforeTx["user"][2]["plp_balance"] )
+            console.log("Pre op value :", beforeTx["user"][2]["plp_balance"]*beforeTx["vault"]["share_price"])
+            console.log("Post op value :", afterTx["user"][2]["plp_balance"]*afterTx["vault"]["share_price"])
             console.log("--")
 
             console.log("User 3")
             console.log("Amount invested : ", deposit3)
-            console.log("Acq. price of PLP :", deposit3/afterUser3["plp_balance"] )
-            console.log("PLP received : ", afterUser3["plp_balance"])
-            console.log("Value of investment : ", afterUser3["plp_balance"]*afterVault["price_per_share"])
-            console.log("Fees paid :", (deposit3-afterUser3["plp_balance"]*afterVault["price_per_share"])/deposit3)
+            console.log("Acq. price of PLP :", deposit3/afterTx["user"][3]["plp_balance"] )
+            console.log("PLP received : ", afterTx["user"][3]["plp_balance"])
+            console.log("Value of investment : ", afterTx["user"][3]["plp_balance"]*afterTx["vault"]["share_price"])
+            console.log("Fees paid :", (deposit3-afterTx["user"][3]["plp_balance"]*afterTx["vault"]["share_price"])/deposit3)
           });
         });
         describe("Withdraw of a user", function () {
           before(async () => {
-            beforePos = await positionInfo(false)
-            beforeUser = await userInfo(user)
-            beforeUser2 = await userInfo(user2)
-            beforeUser3 = await userInfo(user3)
-            beforeVault = await vaultInfo()
+            beforeTx = await getData(MyVault, GMX_controller, USDC, user, user2, user3)
+            let a =  await parseInt(await WaitingPositionsLength(GMX_POSITION_ROUTER, false))
             withdrawamount = "100000000"
             let txclosepos = await MyVault.connect(user3).withdraw(
               withdrawamount,
@@ -339,58 +262,58 @@ const { ABIS, ADDRESS } = require("./@config");
             );
             txr2 = await txclosepos.wait();
             await executeDecreasePositions();
-
-            afterPos = await positionInfo(false)
-            afterUser = await userInfo(user)
-            afterUser2 = await userInfo(user2)
-            afterUser3 = await userInfo(user3)
-            afterVault = await vaultInfo()
+            let b =  await parseInt(await WaitingPositionsLength(GMX_POSITION_ROUTER, false))
+            console.log("a:",a)
+            console.log(b)
+            afterTx = await getData(MyVault, GMX_controller, USDC, user, user2, user3)
+            console.log(beforeTx)
+            console.log(afterTx)
           });
           it("test on position", async function () {
-            console.log(beforePos)
-            console.log(afterPos)
-            await expect(beforePos["collateral"]).to.be.equal(afterPos["collateral"]+0.99*parseInt(withdrawamount)*10**24)
-            await expect(afterPos["leverage"]).to.be.within(1.09, 1.11)
+            console.log(beforeTx["positions"]["short"])
+            console.log(afterTx["positions"]["short"])
+            await expect(beforeTx["positions"]["short"]["collateral"]).to.be.equal(afterTx["positions"]["short"]["collateral"]+0.99*parseInt(withdrawamount)*10**24)
+            await expect(afterTx["positions"]["short"]["leverage"]).to.be.within(1.09, 1.11)
           });
           it("test on users", async function () {
-            await expect((afterUser3["usdc_balance"]-beforeUser3["usdc_balance"])/10**6).to.be.within(98,100)
-            await expect(afterUser["plp_balance"]*afterVault["price_per_share"]).to.be.within(beforeUser["plp_balance"]*beforeVault["price_per_share"], beforeUser["plp_balance"]*beforeVault["price_per_share"]*1.01)
-            await expect(afterUser2["plp_balance"]*afterVault["price_per_share"]).to.be.within(beforeUser2["plp_balance"]*beforeVault["price_per_share"], beforeUser2["plp_balance"]*beforeVault["price_per_share"]*1.01)
+            await expect((afterTx["user"][3]["usdc_balance"]-beforeTx["user"][3]["usdc_balance"])/10**6).to.be.within(98,100)
+            await expect(afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"]).to.be.within(beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"], beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"]*1.01)
+            await expect(afterTx["user"][2]["plp_balance"]*afterTx["vault"]["share_price"]).to.be.within(beforeTx["user"][2]["plp_balance"]*beforeTx["vault"]["share_price"], beforeTx["user"][2]["plp_balance"]*beforeTx["vault"]["share_price"]*1.01)
 
           });
           it("report", async function () {
             console.log("Withdraw :", (parseInt("100000000")))
-            console.log("Pre op leverage", beforePos["leverage"])
-            console.log("Pre money price per share :", beforeVault["price_per_share"])
-            console.log("Post money price per share :", afterVault["price_per_share"])
-            console.log("Post op leverage", afterPos["leverage"])
-            console.log("Delta nav :", beforeVault["net_asset_value"]-afterVault["net_asset_value"])
+            console.log("Pre op leverage", beforeTx["positions"]["leverage"])
+            console.log("Pre money price per share :", beforeTx["vault"]["share_price"])
+            console.log("Post money price per share :", afterTx["vault"]["share_price"])
+            console.log("Post op leverage", afterTx["positions"]["short"]["leverage"])
+            console.log("Delta nav :", beforeTx["vault"]["net_asset_value"]-afterTx["vault"]["net_asset_value"])
 
             console.log("--")
             console.log("User 1")
-            console.log("Acq. price of PLP :", deposit1/beforeUser["plp_balance"] )
-            console.log("Pre op value :", beforeUser["plp_balance"]*beforeVault["price_per_share"])
-            console.log("Post op value :", afterUser["plp_balance"]*afterVault["price_per_share"])
+            console.log("Acq. price of PLP :", deposit1/beforeTx["user"][1]["plp_balance"] )
+            console.log("Pre op value :", beforeTx["user"][1]["plp_balance"]*beforeTx["vault"]["share_price"])
+            console.log("Post op value :", afterTx["user"][1]["plp_balance"]*afterTx["vault"]["share_price"])
             console.log("--")
 
             console.log("User 2")
-            console.log("Acq. price of PLP :", deposit2/beforeUser2["plp_balance"] )
-            console.log("Pre op value :", beforeUser2["plp_balance"]*beforeVault["price_per_share"])
-            console.log("Post op value :", afterUser2["plp_balance"]*afterVault["price_per_share"])
+            console.log("Acq. price of PLP :", deposit2/beforeTx["user"][2]["plp_balance"] )
+            console.log("Pre op value :", beforeTx["user"][2]["plp_balance"]*beforeTx["vault"]["share_price"])
+            console.log("Post op value :", afterTx["user"][2]["plp_balance"]*afterTx["vault"]["share_price"])
             console.log("--")
 
             console.log("User 3")
-            console.log("Acq. price of PLP :", deposit3/beforeUser3["plp_balance"] )
-            console.log("PLP before op :", beforeUser3["plp_balance"]/10**6)
-            console.log("Value before op :", beforeUser3["plp_balance"]*beforeVault["price_per_share"]/10**6)
+            console.log("Acq. price of PLP :", deposit3/beforeTx["user"][3]["plp_balance"] )
+            console.log("PLP before op :", beforeTx["user"][3]["plp_balance"]/10**6)
+            console.log("Value before op :", beforeTx["user"][3]["plp_balance"]*beforeTx["vault"]["share_price"]/10**6)
 
-            console.log("PLP remaining : ", afterUser3["plp_balance"]/10**6)
-            console.log("Post op Value of investment : ", afterUser3["plp_balance"]*afterVault["price_per_share"]/10**6)
+            console.log("PLP remaining : ", afterTx["user"][3]["plp_balance"]/10**6)
+            console.log("Post op Value of investment : ", afterTx["user"][3]["plp_balance"]*afterTx["vault"]["share_price"]/10**6)
 
-            console.log("PLP Sold :", (beforeUser3["plp_balance"]-afterUser3["plp_balance"])/10**6)
-            console.log("Value sold :", beforeUser3["plp_balance"]*beforeVault["price_per_share"]-afterUser3["plp_balance"]*afterVault["price_per_share"])
-            console.log("Value per PLP sold : ", (beforeUser3["plp_balance"]*beforeVault["price_per_share"]-afterUser3["plp_balance"]*afterVault["price_per_share"])/(beforeUser3["plp_balance"]-afterUser3["plp_balance"]))
-            console.log("USDC en + :", (afterUser3["usdc_balance"]-beforeUser3["usdc_balance"])/10**6)
+            console.log("PLP Sold :", (beforeTx["user"][3]["plp_balance"]-afterTx["user"][3]["plp_balance"])/10**6)
+            console.log("Value sold :", beforeTx["user"][3]["plp_balance"]*beforeTx["vault"]["share_price"]-afterTx["user"][3]["plp_balance"]*afterTx["vault"]["share_price"])
+            console.log("Value per PLP sold : ", (beforeTx["user"][3]["plp_balance"]*beforeTx["vault"]["share_price"]-afterTx["user"][3]["plp_balance"]*afterTx["vault"]["share_price"])/(beforeTx["user"][3]["plp_balance"]-afterTx["user"][3]["plp_balance"]))
+            console.log("USDC en + :", (afterTx["user"][3]["usdc_balance"]-beforeTx["user"][3]["usdc_balance"])/10**6)
           });
         });
       });

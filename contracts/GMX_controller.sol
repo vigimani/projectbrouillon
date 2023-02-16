@@ -106,30 +106,5 @@ contract GMX_controller is Ownable {
             IGMXPositionRouter(gmxPositionRouter).createDecreasePosition{value: msg.value}(path, WETH, 0, sizeDelta, isLong, msg.sender, acceptablePrice, 0, 10000000000000000, false, address(0));
         }
     }
-    // function updateValue() external onlyOwner{        
-    // }
-    
-    // function getPositions() public {
-    //     address[] memory _collateralTokens = new address[](2);
-    //     address[] memory _indexTokens = new address[](2);
-    //     bool[] memory _isLong = new bool[](2);
-    //     _collateralTokens[0] = WETH;
-    //     _collateralTokens[1] = USDC;
-    //     _indexTokens[0] = WETH;
-    //     _indexTokens[1] = WETH;
-    //     _isLong[0] = true;
-    //     _isLong[1] = false;
-    //     return IGMXReader(gmxReader).getPositions(gmxVault, address(this), _collateralTokens, _indexTokens, _isLong);
-    // }
 
-    // //Post withdraw fees, in USDC ? 
-    // function getValue() external view {
-    // }
-
-    // function setSlippage(){
-
-    // }
-    // function setLeverage(){
-
-    // }
 }
