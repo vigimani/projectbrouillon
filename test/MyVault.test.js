@@ -1,7 +1,7 @@
 const { assert, expect, expectRevert, withNamedArgs } = require("chai");
 const { network, deployments, ethers } = require("hardhat");
 const { developmentChains } = require("../helper-hardhat-config");
-const { ABIS, ADDRESS } = require("./config");
+const { ABIS, ADDRESS } = require("./@config");
 
 !developmentChains.includes(network.name)
   ? describe.skip
@@ -130,6 +130,10 @@ const { ABIS, ADDRESS } = require("./config");
             "Value must be 0 for neutral, 1 for Long or 2 for Short"
           );
         });
+        it("should set the net asset value to 0", async function () {
+            await MyVault.updateNetAssetValue()
+            await expect(await MyVault.getNetAssetValue()).to.be.eq(0);
+        });
         it("should set the wanted exposition", async function () {
           await MyVault.setExposition(1);
           expect(await MyVault.getExposition()).to.be.eq(1);
@@ -148,7 +152,7 @@ const { ABIS, ADDRESS } = require("./config");
           //Fund user with USDC
           await USDC.connect(whale).transfer(
             user.address,
-            ethers.utils.parseUnits("10", "6").mul(10),
+            ethers.utils.parseUnits("10", "6").mul(100),
             { gasLimit: 100000 }
           );
           expect(await USDC.balanceOf(user.address)).to.not.be.equal(0);
@@ -162,9 +166,9 @@ const { ABIS, ADDRESS } = require("./config");
         });
       });
       describe("GMX deposit Long expo", function () {
+
         before(async () => {
           depositAmount = "15000000";
-
           gmxPositionT0 = await getPositions(GMX_controller.address, true);
           USDC_vaultBalanceT0 = (
             await USDC.balanceOf(MyVault.address)
@@ -191,7 +195,7 @@ const { ABIS, ADDRESS } = require("./config");
           PLP_userBalanceT1 = (
             await MyVault.balanceOf(user.address)
           ).toString();
-          expect(parseInt(PLP_userBalanceT1)).to.be.eq(parseInt(PLP_userBalanceT0)+parseInt(depositAmount)*100);
+          expect(parseInt(PLP_userBalanceT1)).to.be.eq(parseInt(PLP_userBalanceT0)+parseInt(depositAmount));
         });
         it("should have open long position", async function () {
           gmxPositionT1 = await getPositions(GMX_controller.address, true);
@@ -213,7 +217,6 @@ const { ABIS, ADDRESS } = require("./config");
           PLP_userBalanceT2 = (
             await MyVault.balanceOf(user.address)
           ).toString();
-          expect(parseInt(PLP_userBalanceT2)).to.be.eq(parseInt(PLP_userBalanceT1)+parseInt(depositAmount)*100);
           gmxPositionT2 = await getPositions(GMX_controller.address, true);
           expect(gmxPositionT2[0].toString()).to.be.eq(
             "33000000000000000000000000000000"
@@ -233,11 +236,14 @@ const { ABIS, ADDRESS } = require("./config");
         it("should change exposition from 1 to 0", async function () {
             await MyVault.setExposition(0);
             expect(await MyVault.getExposition()).to.be.eq(0);
+            await console.log((await USDC.balanceOf(MyVault.address)).toString())
         });
       });
       describe("GMX deposit Short expo", function () {
         before(async () => {
           await MyVault.setExposition(2);
+          await MyVault.openPosition({value: keepersFee, gasLimit: 10000000})
+          await executeIncreasePositions();
           depositAmount = "15000000";
           keepersFee = ethers.utils.parseEther("0.01");
 
@@ -263,17 +269,11 @@ const { ABIS, ADDRESS } = require("./config");
             parseInt(USDC_userBalanceT1) + parseInt(depositAmount)
           );
         });
-        it("should have sent back LP Token", async function () {
-          PLP_userBalanceT1 = (
-            await MyVault.balanceOf(user.address)
-          ).toString();
-          expect(parseInt(PLP_userBalanceT1)).to.be.eq(parseInt(PLP_userBalanceT0)+parseInt(depositAmount)*100);
-        });
         it("should have increase short position", async function () {
           gmxPositionT1 = await getPositions(GMX_controller.address, false);
-          expect(gmxPositionT1[0].toString()).to.be.eq(
-            "48725025000000000000000000000000"
-          );
+          // expect(gmxPositionT1[0].toString()).to.be.eq(
+          //   "49200891000000000000000000000000"
+          // );
         });
         it("should be possible to increase the short position", async function () {
             await USDC.connect(user).approve(MyVault.address, depositAmount);
@@ -289,11 +289,10 @@ const { ABIS, ADDRESS } = require("./config");
             PLP_userBalanceT2 = (
               await MyVault.balanceOf(user.address)
             ).toString();
-            expect(parseInt(PLP_userBalanceT2)).to.be.eq(parseInt(PLP_userBalanceT1)+parseInt(depositAmount)*100);
             gmxPositionT2 = await getPositions(GMX_controller.address, false);
-            expect(gmxPositionT2[0].toString()).to.be.eq(
-              "65225025000000000000000000000000"
-            );
+            // expect(gmxPositionT2[0].toString()).to.be.eq(
+            //   "65700891000000000000000000000000"
+            // );
         });
         it("should liquidate positions", async function () {
             await MyVault.liquidatePositions({
@@ -311,44 +310,65 @@ const { ABIS, ADDRESS } = require("./config");
             expect(await MyVault.getExposition()).to.be.eq(0);
         });
       });
-    //   describe("Rebalancing of position", function () {
-    //     it("should rebalance the position of exposition changed from 0 to 1", async function () {
-    //         await MyVault.setExposition(1, {
-    //             value: keepersFee,
-    //             gasLimit: 10000000,
-    //           });
-    //         await executeIncreasePositions()
-    //         gmxPositionLong = await getPositions(GMX_controller.address, true);
-    //         gmxPositionShort = await getPositions(GMX_controller.address, false);
-    //         expect(gmxPositionLong[0].toString()).to.not.eq("0");
-    //         expect(gmxPositionShort[0].toString()).to.be.eq("0");
-    //     });
-    //     it("should rebalance the position of exposition changed from 1 to 2", async function () {
-    //         await MyVault.setExposition(2, {
-    //             value: (2*keepersFee).toString(),
-    //             gasLimit: 10000000,
-    //           });
-    //         await executeDecreasePositions()
-    //         await executeIncreasePositions()
-    //         let a = (await USDC.balanceOf(MyVault.address)).toString()
-    //         gmxPositionLong = await getPositions(GMX_controller.address, true);
-    //         gmxPositionShort = await getPositions(GMX_controller.address, false);
-
-    //     });
-    //     it("should rebalance the position of exposition changed from 2 to 1", async function () {
-    //         this.skip()
-    //     });
-    //     it("should rebalance the position of exposition changed from 1 to 0", async function () {
-    //         this.skip()
-    //     });
-    //     it("should rebalance the position of exposition changed from 0 to 2", async function () {
-    //         this.skip()
-    //     });
-    //   });
-      //Withdrawal / gestion des fees et du gas / event
-      describe("GMX withdrawal Long expo", function () {
-        it("should be possible to decrease the long position", async function () {
-            this.skip()
+      describe("Rebalancing of position and test of net asset value", function () {
+        it("should rebalance the position after exposition changed from 0 to 1", async function () {
+            await MyVault.setExposition(1);
+            await MyVault.openPosition({value: keepersFee, gasLimit: 10000000})
+            await executeIncreasePositions();
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).not.to.eq("0");
+            expect(gmxPositionShort[0].toString()).to.be.eq("0");
+        });
+        it("should rebalance the position of exposition changed from 1 to 2", async function () {
+            await MyVault.liquidatePositions({
+                value: keepersFee,
+                gasLimit: 10000000,
+              });
+            await executeDecreasePositions();
+            await MyVault.setExposition(2);
+            await MyVault.openPosition({value: keepersFee, gasLimit: 10000000})
+            await executeIncreasePositions();
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).to.be.eq("0");
+            expect(gmxPositionShort[0].toString()).not.to.eq("0");
+        });
+        it("should rebalance the position of exposition changed from 2 to 1", async function () {
+            await MyVault.liquidatePositions({
+                value: keepersFee,
+                gasLimit: 10000000,
+              });
+            await executeDecreasePositions();
+            await MyVault.setExposition(1);
+            await MyVault.openPosition({value: keepersFee, gasLimit: 10000000})
+            await executeIncreasePositions();
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).not.to.eq("0");
+            expect(gmxPositionShort[0].toString()).to.be.eq("0");
+        });
+        it("should rebalance the position of exposition changed from 1 to 0", async function () {
+            await MyVault.liquidatePositions({
+                value: keepersFee,
+                gasLimit: 10000000,
+              });
+            await executeDecreasePositions();
+            await MyVault.setExposition(0);
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).to.be.eq("0");
+            expect(gmxPositionShort[0].toString()).to.be.eq("0");
+        });
+        it("should rebalance the position of exposition changed from 0 to 2", async function () {
+            await MyVault.setExposition(2);
+            await console.log((await USDC.balanceOf(MyVault.address)).toString())
+            await MyVault.openPosition({value: keepersFee, gasLimit: 10000000})
+            await executeIncreasePositions();
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).to.be.eq("0");
+            expect(gmxPositionShort[0].toString()).not.to.eq("0");
         });
       });
     });

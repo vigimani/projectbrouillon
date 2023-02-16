@@ -15,6 +15,15 @@ module.exports = async({ getNamedAccounts, deployments }) => {
         waitConfirmations: network.config.blockConfirmations || 1
     })
 
+    arguments = [MyVault.address] 
+    const GMX_controller = await deploy("GMX_controller", {
+        from: deployer,
+        args: arguments,
+        log: true,
+        waitConfirmations: network.config.blockConfirmations || 1
+    })
+
+
     //Verify the smart contract 
     if(!developmentChains.includes(network.name) && process.env.ETHERSCAN) {
         log("Verifying...")

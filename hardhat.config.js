@@ -16,7 +16,7 @@ module.exports = {
   networks: {
     hardhat: {
       forking: {
-        url: ARB_URL,
+        url: ARB_URL
       }
       // ,
       // mining: {

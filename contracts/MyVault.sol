@@ -24,6 +24,7 @@ contract MyVault is Ownable, ERC20 {
     uint256 public collateral;
     uint256 public deltavalue;
     uint256 public netAssetValue; 
+    bool public isOpen;
 
     bool isInit;
 
@@ -40,9 +41,11 @@ contract MyVault is Ownable, ERC20 {
     // event Withdrawal(); 
 
     constructor() ERC20("Polyplus", "PLP") {
-        _mint(msg.sender, 100 * 10**uint256(decimals()));
+        // _mint(msg.sender, 100 * 10**uint256(decimals()));
         exposition = 0;
+        netAssetValue = 0;
         isInit = false;
+        isOpen = false; 
     }
 
     modifier isInitialized() {
@@ -50,27 +53,8 @@ contract MyVault is Ownable, ERC20 {
         _;
     }
 
-    function setNetAssetValue() external onlyOwner isInitialized{
-        bool isLong = (exposition == 1? true : false );
-        if (exposition == 0) {
-            collateral = 0;
-            deltavalue = 0;
-            netAssetValue = ERC20(USDC).balanceOf(address(this));
-        } else if (exposition == 1 ) {
-            (,uint256 _collateral,,,,,,uint256 _deltavalue) = IGMXVault(gmxVault).getPosition(GMX_controller, WETH, WETH, isLong);
-            collateral = _collateral;
-            deltavalue = _deltavalue;
-            netAssetValue = _collateral+_deltavalue;
-        } else {
-            (,uint256 _collateral,,,,,,uint256 _deltavalue) = IGMXVault(gmxVault).getPosition(GMX_controller, USDC, WETH, isLong);
-            collateral = _collateral;
-            deltavalue = _deltavalue;
-            netAssetValue = _collateral-_deltavalue;
-        }
-    }
-    function getNetAssetValue() external view returns(uint256){
-        return netAssetValue;
-    }
+    // ::::::::::::: HANDLING TOKEN LISTS ACCEPTED ::::::::::::: //
+
     //Gestion des tokens acceptés [until now stable only with USDC]
     /// @notice whitelist the token accepted in the vault, allow a better control
     /// @dev until now, only USDC deposit are handled
@@ -89,6 +73,8 @@ contract MyVault is Ownable, ERC20 {
         return tokenAccepted[tokenAddress];
     }
 
+    // ::::::::::::: GMX CONTROLLER ::::::::::::: //
+
     /// @notice function that sets the exposition of the contract (Long Short or Neutral and rebalance assets accordingly)
     /// @dev only the owner can call this function 
     /// @param _addr address of the controller to add
@@ -99,6 +85,8 @@ contract MyVault is Ownable, ERC20 {
     function getGMX_controller() public view returns (address) {
         return GMX_controller;
     }
+
+    // ::::::::::::: STRATEGY EXPOSITION AND GLOBAL TX ::::::::::::: //
 
     /// @notice function that sets the exposition of the contract (Long Short or Neutral and rebalance assets accordingly)
     /// @dev only the owner can call this function 
@@ -111,45 +99,78 @@ contract MyVault is Ownable, ERC20 {
         require(exposition != _exposition, "Reverted because exposition has not changed");
         exposition = _exposition;
     }
-
-    function liquidatePositions() external payable onlyOwner isInitialized {
-        require(exposition != 0, "Exposition is 0 you should not have a position to liquidate");
-        bool isLong = (exposition == 1? true : false );
-        IGMXController(GMX_controller).liquidatePosition{value: msg.value}(isLong);
-    }
-
-    ///Check du 15 avec le bon nombre de décimal
-    function openPosition() external payable onlyOwner isInitialized {
-        require(IERC20(USDC).balanceOf(address(this)) > 15, "Amount to small to open a position, minimum 15$");
-        bool isLong = (exposition == 1? true : false );
-        IERC20(USDC).approve(GMX_controller,IERC20(USDC).balanceOf(address(this)));
-        IGMXController(GMX_controller).increasePosition{value: msg.value}(IERC20(USDC).balanceOf(address(this)), isLong);
-    }
     function getExposition() external view returns (uint8) {
         return exposition;
     }
+    function liquidatePositions() external payable onlyOwner isInitialized {
+        require(exposition != 0, "Exposition is 0 you should not have a position to liquidate");
+        require(isOpen == true, "no position open");
+        bool isLong = (exposition == 1? true : false );
+        IGMXController(GMX_controller).liquidatePosition{value: msg.value}(isLong);
+        isOpen == false; 
+    }
+    function openPosition() external payable onlyOwner isInitialized {
+        // require(IERC20(USDC).balanceOf(address(this)) > 15000000, "Amount too small to open a position, minimum 15$");
+        bool isLong = (exposition == 1? true : false );
+        IERC20(USDC).approve(GMX_controller,IERC20(USDC).balanceOf(address(this)));
+        IGMXController(GMX_controller).increasePosition{value: msg.value}(IERC20(USDC).balanceOf(address(this)), isLong);
+        isOpen == true; 
+    }
 
+    // ::::::::::::: NET ASSET VALUE OF THE FUNDS ::::::::::::: //
+    //NOT READY
+    function updateNetAssetValue() external onlyOwner isInitialized{
+        _updateNAV();
+    }
+    function _updateNAV() private {
+        bool isLong = (exposition == 1? true : false );
+        if (exposition == 0 || isOpen == false) {
+            collateral = 0;
+            deltavalue = 0;
+            netAssetValue = ERC20(USDC).balanceOf(address(this));
+        } else if (exposition == 1 ) {
+            (,uint256 _collateral,,,,,,) = IGMXVault(gmxVault).getPosition(GMX_controller, WETH, WETH, isLong);
+            (,uint256 _deltavalue) = IGMXVault(gmxVault).getPositionDelta(GMX_controller, WETH, WETH, isLong);
+            collateral = _collateral;
+            deltavalue = _deltavalue;
+            netAssetValue = (_collateral+_deltavalue)/10**24;
+        } else {
+            (,uint256 _collateral,,,,,,) = IGMXVault(gmxVault).getPosition(GMX_controller, USDC, WETH, isLong);
+            (,uint256 _deltavalue) = IGMXVault(gmxVault).getPositionDelta(GMX_controller, USDC, WETH, isLong);
+            collateral = _collateral;
+            deltavalue = _deltavalue;
+            netAssetValue = (_collateral-_deltavalue)/10**24;
+        }
+    }
+
+    function getNetAssetValue() external view returns(uint256){
+        return netAssetValue;
+    }
+    
+    // ::::::::::::: USER INTERFACE ::::::::::::: //
 
     /// @notice function for depositing ana ccepted token on the vault
     /// token address to deposit [to implement later]
     function deposit(address tokenAddress, uint256 _amount) external payable {
         require(tokenAccepted[tokenAddress], "Token not yet supported");
         require(_amount > 0, "Amount to deposit is mandatory");
-        uint256 amountToken = _amount;
+        // require(msg.value > ,"");
+        uint256 amountToken = _amount-_amount/100;
         uint256 supplyPLPToken = this.totalSupply();
         uint256 amountPLPToken;
         if (supplyPLPToken == 0) {
-            amountPLPToken = amountToken;
+            amountPLPToken = _amount;
         } else {
             //update la value de la vault and harvest
-            vaultValue = 10**18;
-            amountPLPToken = (amountToken * supplyPLPToken) / vaultValue;
+            _updateNAV();
+            amountPLPToken = ((amountToken * supplyPLPToken) / netAssetValue);  //1% entry fees paid to GMX [0.1% entry fees + 0.8% swap fees]
+
         }
         _mint(msg.sender, amountPLPToken);
         IERC20(tokenAddress).transferFrom(
             msg.sender,
             address(this),
-            amountToken
+            _amount
         );
         IERC20(tokenAddress).approve(GMX_controller, _amount);
         if (exposition == 1) {
@@ -157,27 +178,38 @@ contract MyVault is Ownable, ERC20 {
                 _amount,
                 true
             );
+            isOpen = true;
         } else if (exposition == 2) {
             IGMXController(GMX_controller).increasePosition{value: msg.value}(
                 _amount,
                 false
             );
+             isOpen = true;
         }
-        // emit Deposit
+        //event emit deposit(address, tokenaddress, amountdeposited, acqu price per PLP, fees paid)
     }
 
+    function withdraw(uint256 _amount) external payable {
+        require(_amount > 0);
+        require(this.balanceOf(msg.sender)>= _amount, "Surprisingly you cannot withdraw token you have not bought");
+        _updateNAV();
+        uint256 unitPrice ;
+        unitPrice = netAssetValue / this.totalSupply();
+        _burn(msg.sender, _amount);
+        uint256 amountToken = _amount-_amount/100;
+        if (exposition == 1) {
+            IGMXController(GMX_controller).decreasePosition{value: msg.value}(
+                msg.sender,
+                amountToken*unitPrice,
+                true
+            );
+        } else if (exposition == 2) {
+            IGMXController(GMX_controller).decreasePosition{value: msg.value}(
+                msg.sender,
+                amountToken*unitPrice,
+                false
+            );
+        }
 
-    // function getPositions() public isInitialized {
-    //     return IGMXController(GMX_controller).getLongPosition();
-    // }
-    // function withdraw(uint256 _amount) external {
-    //     require(_amount > 0);
-    //     uint256 amountPLPToken = _amount;
-    //     uint256 supplyPLPToken = this.totalSupply();
-    //     //update la value de la vault and harvest
-    //     uint256 amountToken = (amountPLPToken * vaultValue) / supplyPLPToken;
-    //     _burn(msg.sender, amountPLPToken);
-    //     //Calcul pour savoir si les tokens qui sortent sont plus nombreux que ceux qui rentrent si oui fees
-    //     token.transfer(msg.sender, amountToken);
-    // }
+    }
 }

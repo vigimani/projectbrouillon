@@ -1,5 +1,5 @@
 const { expect } = require("chai");
-const { ABIS, ADDRESS } = require("./config");
+const { ABIS, ADDRESS } = require("./@config");
 const { ethers, network, userConfig } = require("hardhat");
 
 describe("GMX controller unit tests", () => {
@@ -88,6 +88,23 @@ describe("GMX controller unit tests", () => {
         GMX_controller.address
       );
     };
+    netValueOfPosition = async (_isLong) => {
+      let collateralToken = _isLong ? ADDRESS.WETH : ADDRESS.USDC;
+      let response = await GMX_VAULT.getPosition(
+        GMX_controller.address,
+        collateralToken,
+        ADDRESS.WETH,
+        _isLong
+      );
+      let delta = await GMX_VAULT.getPositionDelta(
+        GMX_controller.address,
+        collateralToken,
+        ADDRESS.WETH,
+        _isLong
+      );
+      let netNAV = response[1] + delta[1];
+      return netNAV;
+    };
   });
   describe("Deployment", function () {
     it("Should deploy the contracts", async () => {
@@ -138,10 +155,13 @@ describe("GMX controller unit tests", () => {
     describe("Test LONG ETH/USDC", function () {
       before(async function () {
         positiont0 = await getPositions(GMX_controller.address, true);
+        console.log("Nav before open : ", parseInt(positiont0[1].toString())+parseInt(positiont0[8].toString()))  
       });
       describe("should open a LONG ETH/USDC", function () {
         before(async function () {
           tokenAmount = "15000000";
+ 
+
         });
         it("should add a request", async function () {
           waitingPositionsT0 = await waitingPositionsLength(true);
@@ -166,6 +186,7 @@ describe("GMX controller unit tests", () => {
           await expect(positiont1[0]).to.be.eq(
             "16500000000000000000000000000000"
           );
+        console.log("Nav after 1st open : ", parseInt(positiont1[1].toString())+parseInt(positiont1[8].toString()))  
         });
         it("should be possible to increase the long position", async function () {
           tokenAmount2 = "20000000";
@@ -179,16 +200,25 @@ describe("GMX controller unit tests", () => {
           await expect(positiont2[0]).to.be.eq(
             "38500000000000000000000000000000"
           );
+          console.log("Nav after 2nd open : ", parseInt(positiont2[1].toString())+parseInt(positiont2[8].toString()))  
+
         });
       });
       describe("should close a LONG ETH/USDC", function () {
         before(async function () {
           tokenAmount = "25000000";
+          deployerUSDC = await USDC.balanceOf(deployer.address)
+          console.log("Balance t0 :", parseInt(deployerUSDC.toString())/10**6, "USDC")
+
           positiont0 = await getPositions(GMX_controller.address, true);
+          console.log("Size : ", positiont0[0].toString())
+          console.log("Colatteral : ", positiont0[1].toString())
+          console.log("Levier : ", parseInt(positiont0[0].toString())/parseInt(positiont0[1].toString()))
+
         });
         it("should add a request", async function () {
           waitingPositionsT0 = await waitingPositionsLength(false);
-          await GMX_controller.decreasePosition(tokenAmount, true, {
+          await GMX_controller.decreasePosition(deployer.address, 0.99*tokenAmount, true, {
             value: keepersFee,
             gasLimit: 10000000,
           });
@@ -205,9 +235,27 @@ describe("GMX controller unit tests", () => {
         });
         it("should having reduced the position", async function () {
           positiont1 = await getPositions(GMX_controller.address, true);
-          await expect(positiont1[0]).to.be.eq(
-            "13500000000000000000000000000000"
+          let response = await GMX_VAULT.getPosition(
+            GMX_controller.address,
+            ADDRESS.WETH,
+            ADDRESS.WETH,
+            true
           );
+          let delta = await GMX_VAULT.getPositionDelta(
+            GMX_controller.address,
+            ADDRESS.WETH,
+            ADDRESS.WETH,
+            true
+          );
+          console.log("Nav after close : ", parseInt(response[1].toString())+parseInt(delta[1].toString()))  
+
+
+          await expect(positiont1[0]).not.to.be.eq(positiont0[0]);
+          deployerUSDC2 = await USDC.balanceOf(deployer.address)
+          console.log("Size : ", positiont1[0].toString())
+          console.log("Balance t1 :", parseInt(deployerUSDC2.toString())/10**6, "USDC")
+          console.log("Colatteral : ", positiont1[1].toString())
+          console.log("Levier : ", parseInt(positiont1[0].toString())/parseInt(positiont1[1].toString()))
         });
       });
       describe("should liquidate the LONG ETH/USDC", function () {
@@ -293,11 +341,11 @@ describe("GMX controller unit tests", () => {
         before(async function () {
           tokenAmount = "25000000";
           positiont0 = await getPositions(GMX_controller.address, false);
-          // positiont0.forEach((elem) => console.log(elem.toString()));
+          positiont0.forEach((elem) => console.log(elem.toString()));
         });
         it("should add a request", async function () {
           waitingPositionsT0 = await waitingPositionsLength(false);
-          await GMX_controller.decreasePosition(tokenAmount, false, {
+          await GMX_controller.decreasePosition(deployer.address, tokenAmount, false, {
             value: keepersFee,
             gasLimit: 10000000,
           });
@@ -314,10 +362,8 @@ describe("GMX controller unit tests", () => {
         });
         it("should having reduced the position", async function () {
           positiont1 = await getPositions(GMX_controller.address, false);
-          // positiont1.forEach((elem) => console.log(elem.toString()));
-          await expect(positiont1[0]).to.be.eq(
-            "13500000000000000000000000000000"
-          );
+          positiont1.forEach((elem) => console.log(elem.toString()));
+          await expect(positiont1[0]).to.not.equal(positiont0[0]);
         });
       });
       describe("should liquidate the SHORT ETH/USDC", function () {

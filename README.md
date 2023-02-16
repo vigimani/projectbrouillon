@@ -20,3 +20,11 @@ npx hardhat run scripts/deploy.js
             // expect(gmxPositionT3[0].toString()).to.be.eq("0");
             // let a = await USDC.balanceOf(MyVault.address);
             // console.log(a.toString())
+
+
+                        await MyVault.setExposition(1);
+            console.log("USDC balance of vault :",)
+            gmxPositionLong = await getPositions(GMX_controller.address, true);
+            gmxPositionShort = await getPositions(GMX_controller.address, false);
+            expect(gmxPositionLong[0].toString()).to.not.eq("0");
+            expect(gmxPositionShort[0].toString()).to.be.eq("0");

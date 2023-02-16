@@ -109,6 +109,45 @@
       ],
       "stateMutability": "nonpayable",
       "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_account",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_collateralToken",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "_indexToken",
+          "type": "address"
+        },
+        {
+          "internalType": "bool",
+          "name": "_isLong",
+          "type": "bool"
+        }
+      ],
+      "name": "getPositionDelta",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "hasprofit",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256",
+          "name": "lastIncreasedTime",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
     }
   ],
   "bytecode": "0x",
