@@ -136,7 +136,7 @@ describe("GMX controller unit tests", () => {
         //TRANSFER USDC FROM WHALE TO SIGNER
         await USDC.connect(whale).transfer(
           deployer.address,
-          ethers.utils.parseUnits("1000", "6").mul(10),
+          ethers.utils.parseUnits("1000", "6").mul(1000),
           {
             gasLimit: 100000,
           }
@@ -383,7 +383,7 @@ describe("GMX controller unit tests", () => {
       });
       describe("should NOT close a SHORT ETH/USDC", function () {
         it("should not add a request", async function () {
-          await expect(GMX_controller.connect(accoutns[2]).decreasePosition(deployer.address, tokenAmount, false, {
+          await expect(GMX_controller.connect(accounts[2]).decreasePosition(deployer.address, tokenAmount, false, {
             value: keepersFee,
             gasLimit: 10000000,
           })).to.be.revertedWith("Not vault")
@@ -424,7 +424,7 @@ describe("GMX controller unit tests", () => {
           await expect(GMX_controller.connect(accounts[2]).liquidatePosition(false, {
             value: keepersFee,
             gasLimit: 10000000,
-          }).to.be.revertedWith("Not vault"))
+          })).to.be.revertedWith("Not vault")
         });
       });
     });

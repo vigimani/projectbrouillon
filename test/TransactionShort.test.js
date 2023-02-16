@@ -23,7 +23,7 @@ const {getData, WaitingPositionsLength, VaultInfo, UserInfo, PositionInfo, Imper
 
         //VARIABLE
         keepersFee = ethers.utils.parseEther("0.01");
-        deposit1 = "100000000"
+        deposit1 = "100000000" //100 USDC
         deposit2 = "150000000"
         deposit3 = "250000000"
 
@@ -117,7 +117,7 @@ const {getData, WaitingPositionsLength, VaultInfo, UserInfo, PositionInfo, Imper
           await MyVault.acceptToken(USDC.address);
           await USDC.connect(whale).transfer(
             user.address,
-            ethers.utils.parseUnits("10", "6").mul(1000),
+            ethers.utils.parseUnits("10", "6").mul(1000), //10 000 USDC
             { gasLimit: 100000 }
           );
           await USDC.connect(whale).transfer(
@@ -142,6 +142,8 @@ const {getData, WaitingPositionsLength, VaultInfo, UserInfo, PositionInfo, Imper
             beforeTx = await getData(MyVault, GMX_controller, USDC, user)
             await depositStrat(user, deposit1)
             afterTx = await getData(MyVault, GMX_controller, USDC, user)
+            console.log(beforeTx)
+            console.log(afterTx)
           });
           it("tests on user balances", async function () {
             await expect(afterTx["user"][1]["usdc_balance"]).to.be.eq(beforeTx["user"][1]["usdc_balance"]-deposit1)

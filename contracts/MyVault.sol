@@ -14,34 +14,31 @@ import "./interface/gmx/IGMXVault.sol";
 
 ///Arbitrum project
 contract MyVault is Ownable, ERC20 {
-    // ::::::::::::: VARIABLE ::::::::::::: //
-    uint256 public vaultValue;
+    // ::::::::::::: VARIABLE AND EVENT ::::::::::::: //
     address public GMX_controller;
-
-    //Position parameters
-    uint8 public exposition; //0 neutral - 1 Long ETH - 2 short ETH
-    uint256 public collateral;
-    uint256 public deltavalue;
-    uint256 public netAssetValue;
-    bool public isOpen;
-
-    bool isInit;
-
     address public WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
     address public USDC = 0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8;
     address public gmxVault = 0x489ee077994B6658eAfA855C308275EAd8097C4A;
-
+    uint256 public netAssetValue;
+    uint8 public exposition; //0 neutral - 1 Long ETH - 2 short ETH
+    uint8 public fees;
+    bool isInit;
     mapping(address => bool) public tokenAccepted;
-
     event NewTokenAdded(address tokenAddress);
     event TokenRemoved(address tokenAddress);
-    // event ExpositionChanged();
+    event expoEvent(uint256 when, uint8 oldexpo, uint8 newexpo);
     event depositEvent(
         address indexed account,
         uint256 when,
         address token_deposited,
         uint256 amount,
         uint256 PLPissued
+    );
+    event withdrawEvent(
+        address indexed account,
+        uint256 when,
+        uint256 amount,
+        uint256 unitprice
     );
     event navEvent(
         uint256 when,
@@ -56,12 +53,13 @@ contract MyVault is Ownable, ERC20 {
 
     // event Withdrawal();
 
+    // ::::::::::::: CONSTRUCTOR ::::::::::::: //
+
     constructor() ERC20("Polyplus", "PLP") {
         // _mint(msg.sender, 100 * 10**uint256(decimals()));
         exposition = 0;
         netAssetValue = 1;
         isInit = false;
-        isOpen = false;
     }
 
     modifier isInitialized() {
@@ -83,19 +81,16 @@ contract MyVault is Ownable, ERC20 {
         tokenAccepted[tokenAddress] = true;
         emit NewTokenAdded(tokenAddress);
     }
-
     function removeToken(address tokenAddress) external onlyOwner {
         require(tokenAccepted[tokenAddress], "Token not yet added");
         tokenAccepted[tokenAddress] = false;
         emit TokenRemoved(tokenAddress);
     }
-
     function isAccepted(address tokenAddress) external view returns (bool) {
         return tokenAccepted[tokenAddress];
     }
 
-    // ::::::::::::: GMX CONTROLLER ::::::::::::: //
-
+    // ::::::::::::: GMX CONTROLLER ADN FEES::::::::::::: //
     /// @notice function that sets the exposition of the contract (Long Short or Neutral and rebalance assets accordingly)
     /// @dev only the owner can call this function
     /// @param _addr address of the controller to add
@@ -103,10 +98,15 @@ contract MyVault is Ownable, ERC20 {
         GMX_controller = _addr;
         isInit = true;
     }
-
     function getGMX_controller() public view returns (address) {
         return GMX_controller;
     }
+    // function setFees(uint8 _fees) external onlyOwner {
+    //     fees = _fees;
+    // }
+    // function getFees() public returns(uint8) {
+    //     return fees;
+    // }
 
     // ::::::::::::: STRATEGY EXPOSITION AND GLOBAL TX ::::::::::::: //
 
@@ -122,20 +122,13 @@ contract MyVault is Ownable, ERC20 {
             exposition != _exposition,
             "Reverted because exposition has not changed"
         );
+        uint8 oldexposition = exposition;
         exposition = _exposition;
+        emit expoEvent(block.timestamp, oldexposition, exposition);
     }
-
     function getExposition() external view returns (uint8) {
         return exposition;
     }
-
-    function liquidatePositions() external payable onlyOwner isInitialized {
-        bool isLong = (exposition == 1 ? true : false);
-        IGMXController(GMX_controller).liquidatePosition{value: msg.value}(
-            isLong
-        );
-    }
-
     function openPosition() external payable onlyOwner isInitialized {
         // require(IERC20(USDC).balanceOf(address(this)) > 15000000, "Amount too small to open a position, minimum 15$");
         bool isLong = (exposition == 1 ? true : false);
@@ -148,13 +141,19 @@ contract MyVault is Ownable, ERC20 {
             isLong
         );
     }
+    function liquidatePositions() external payable onlyOwner isInitialized {
+        bool isLong = (exposition == 1 ? true : false);
+        IGMXController(GMX_controller).liquidatePosition{value: msg.value}(
+            isLong
+        );
+    }
+
 
     // ::::::::::::: NET ASSET VALUE OF THE FUNDS ::::::::::::: //
     //NOT READY
     function updateNetAssetValue() external onlyOwner isInitialized {
         _updateNAV();
     }
-
     function _updateNAV() private {
         uint256 oldNAV = netAssetValue;
         uint256 _deltavalueLong = 0;
@@ -194,7 +193,6 @@ contract MyVault is Ownable, ERC20 {
             this.totalSupply()
         );
     }
-
     function getNetAssetValue() external view returns (uint256) {
         return netAssetValue;
     }
@@ -213,8 +211,7 @@ contract MyVault is Ownable, ERC20 {
             amountPLPToken = _amount;
         } else {
             _updateNAV();
-            amountPLPToken = ((amountToken * this.totalSupply()) /
-                netAssetValue); //1% entry fees paid to GMX [0.1% entry fees + 0.8% swap fees]
+            amountPLPToken = ((amountToken * this.totalSupply()) / netAssetValue); //1% entry fees paid to GMX [0.1% entry fees + 0.8% swap fees]
         }
         _mint(msg.sender, amountPLPToken);
         IERC20(tokenAddress).transferFrom(msg.sender, address(this), _amount);
@@ -239,7 +236,6 @@ contract MyVault is Ownable, ERC20 {
             amountPLPToken
         );
     }
-
     function withdraw(uint256 _amount) external payable {
         require(_amount > 0);
         require(
@@ -266,5 +262,11 @@ contract MyVault is Ownable, ERC20 {
                 false
             );
         }
+        emit withdrawEvent(
+            msg.sender,
+            block.timestamp,
+            _amount,
+            unitPrice
+        );
     }
 }
